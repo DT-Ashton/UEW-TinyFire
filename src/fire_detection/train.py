@@ -18,6 +18,7 @@ import torch
 from ultralytics import YOLO
 
 from src.modules.nwd.trainer import NWDDetectionTrainer
+from src.modules.attention.src import SpatialRelationalCoAttention
 from src.modules.wiou.trainer import WIoUDetectionTrainer
 
 
@@ -175,8 +176,7 @@ def train_yolo(
     wiou_alpha: Optional[float] = None,
     wiou_delta: Optional[float] = None,
     wiou_momentum: Optional[float] = None,
-    
-    
+    model_yaml: Optional[Union[str, Path]] = None,
 ) -> Dict[str, Any]:
     """
     Run transfer learning fine-tuning using pretrained weights.
@@ -188,6 +188,7 @@ def train_yolo(
     settings = get_training_config()
     weights = weights if weights is not None else settings.get("weights")
     data = data if data is not None else settings.get("data") or get_configured_data_yaml_path()
+    model_yaml = model_yaml if model_yaml is not None else settings.get("model_yaml")
     if weights is None:
         raise ValueError("Training weights are not configured; set training.weights in the config.yaml")
     if data is None:
@@ -229,11 +230,14 @@ def train_yolo(
 
     weights_path = Path(weights).resolve()
     data_path = Path(data).resolve()
+    model_yaml_path = Path(model_yaml).resolve() if model_yaml else None
 
     if not weights_path.is_file():
         raise FileNotFoundError(f"Pretrained weights not found at: {weights_path}")
     if not data_path.is_file():
         raise FileNotFoundError(f"Dataset config YAML not found at: {data_path}")
+    if model_yaml_path is not None and not model_yaml_path.is_file():
+        raise FileNotFoundError(f"Model architecture YAML not found at: {model_yaml_path}")
 
     # Validate hyperparameters
     if epochs < 1:
@@ -268,12 +272,18 @@ def train_yolo(
         device = "0" if torch.cuda.is_available() else "cpu"
     device_str = str(device)
 
-    logger.info(f"Initializing YOLO model from checkpoint: {weights_path}")
+    if model_yaml_path is not None:
+        logger.info(f"Initializing YOLO model from architecture: {model_yaml_path}")
+        logger.info(f"Transferring compatible pretrained weights from: {weights_path}")
+        # The module import above registers its YAML name with Ultralytics;
+        # this remains available when the trainer creates a fresh model.
+        model = YOLO(str(model_yaml_path))
+        model.load(str(weights_path))
+    else:
+        logger.info(f"Initializing YOLO model from checkpoint: {weights_path}")
+        model = YOLO(str(weights_path))
     logger.info(f"Target dataset configuration: {data_path}")
     logger.info(f"Target device: {device_str} (CUDA available: {torch.cuda.is_available()})")
-
-    # Load model from checkpoint
-    model = YOLO(str(weights_path))
 
     # Keep relative or posix format to prevent Windows backslash/colon collisions in WandB logger
     project_path = Path(project)
@@ -336,6 +346,7 @@ def train_yolo(
                     name=wandb_name or name,
                     config={
                         "weights": str(weights_path),
+                        "model_yaml": str(model_yaml_path) if model_yaml_path else None,
                         "data": str(data_path),
                         "epochs": epochs,
                         "batch": batch,
@@ -385,6 +396,7 @@ def train_yolo(
         "device": device_str,
         "data_config": str(data_path),
         "source_weights": str(weights_path),
+        "model_config": str(model_yaml_path) if model_yaml_path else None,
         "metrics_summary": {},
     }
 
@@ -405,6 +417,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Transfer learning training pipeline for fire and smoke detection",
     )
     parser.add_argument("--weights", type=str, default=None, help="Path to pretrained weights (default: config.yaml)")
+    parser.add_argument(
+        "--model-yaml",
+        type=str,
+        default=None,
+        help="Optional model architecture YAML; compatible weights are transferred into it",
+    )
     parser.add_argument(
         "--data",
         type=str,
@@ -508,6 +526,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         summary = train_yolo(
             weights=args.weights,
             data=args.data,
+            model_yaml=args.model_yaml,
             epochs=args.epochs,
             batch=args.batch,
             imgsz=args.imgsz,

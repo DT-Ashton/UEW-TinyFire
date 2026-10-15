@@ -110,6 +110,10 @@ def get_training_config(config_path: Optional[Path] = None) -> Dict[str, Any]:
     resolved_weights = resolve_user_path(weights, config_path=config_path)
     if resolved_weights is not None:
         settings["weights"] = resolved_weights
+    model_yaml = settings.get("model_yaml") or settings.get("model")
+    resolved_model_yaml = resolve_user_path(model_yaml, config_path=config_path)
+    if resolved_model_yaml is not None:
+        settings["model_yaml"] = resolved_model_yaml
     data_path = get_configured_data_yaml_path(config_path)
     if data_path is not None:
         settings.setdefault("data", data_path)

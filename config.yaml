@@ -8,8 +8,9 @@ paths:
   inference_source: "datasets/DFire/test/images"
 
 training:
-  weights: "weights/yolo26n-p2_new.pt"
-  loss: "wiou"
+  weights: "yolo26n-p2.pt"
+  model_yaml: "weights/yolo26n_p2_src.yaml"
+  loss: "ciou"
   epochs: 200
   batch: 16
   imgsz: 640
@@ -18,7 +19,7 @@ training:
   patience: 15
   device: cuda:0
   project: "runs/train"
-  name: "yolo26n-p2_wiou"
+  name: "yolo26n-p2_src"
   workers: 4
   optimizer: "AdamW"
   seed: 42
@@ -26,7 +27,7 @@ training:
   save_period: -1
   exist_ok: true
   val: true
-  amp: false
+  amp: true
   verbose: true
 
   # Custom NWD
