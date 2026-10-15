@@ -1,0 +1,55 @@
+# YOLO26n-P2 with Spatial-Relational Co-Attention (SRC)
+nc: 2          # 0: fire, 1: smoke
+end2end: True  # giữ thiết lập của YOLO26 detection
+reg_max: 1     # DFL bins
+scale: n
+scales:
+  n: [0.50, 0.25, 1024]
+
+backbone:
+  - [-1, 1, Conv, [64, 3, 2]]          # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]         # 1-P2/4 (160x160)
+  - [-1, 2, C3k2, [256, False, 0.25]]  # 2 (Shallow spatial P2)
+  - [-1, 1, Conv, [256, 3, 2]]         # 3-P3/8 (80x80)
+  - [-1, 2, C3k2, [512, False, 0.25]]  # 4
+  - [-1, 1, Conv, [512, 3, 2]]         # 5-P4/16 (40x40)
+  - [-1, 2, C3k2, [512, True]]         # 6
+  - [-1, 1, Conv, [1024, 3, 2]]        # 7-P5/32 (20x20)
+  - [-1, 2, C3k2, [1024, True]]        # 8
+  - [-1, 1, SPPF, [1024, 5, 3, True]]  # 9
+  - [-1, 2, C2PSA, [1024]]             # 10
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 11
+  - [[-1, 6], 1, Concat, [1]]                  # 12 cat backbone P4
+  - [-1, 2, C3k2, [512, True]]                 # 13
+
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 14
+  - [[-1, 4], 1, Concat, [1]]                  # 15 cat backbone P3
+  - [-1, 2, C3k2, [256, True]]                 # 16 (P3/8-small)
+
+  # --- Nhánh P2 đón vật thể siêu nhỏ ---
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]] # 17 (80x80 -> 160x160)
+  - [[-1, 2], 1, Concat, [1]]                  # 18 cat backbone P2 (160x160)
+  - [-1, 2, C3k2, [128, True]]                 # 19 (P2 Feature Map)
+
+  # === CHÈN MODULE SPATIAL-RELATIONAL CO-ATTENTION TẠI ĐÂY ===
+  # Scale n biến 128 channels khai báo ở layer 19 thành 32 channels thực tế.
+  # Custom module không được parser tự scale, nên phải truyền c1=32 trực tiếp.
+  - [-1, 1, SpatialRelationalCoAttention, [32, 8, 8]] # 20 (Refined P2 with memory-safe SRC)
+
+  # --- Đường dẫn Bottom-up ---
+  - [-1, 1, Conv, [128, 3, 2]]                 # 21 (160x160 -> 80x80)
+  - [[-1, 16], 1, Concat, [1]]                 # 22 cat head P3
+  - [-1, 2, C3k2, [256, True]]                 # 23 (P3/8-small)
+
+  - [-1, 1, Conv, [256, 3, 2]]                 # 24 (80x80 -> 40x40)
+  - [[-1, 13], 1, Concat, [1]]                 # 25 cat head P4
+  - [-1, 2, C3k2, [512, True]]                 # 26 (P4/16-medium)
+
+  - [-1, 1, Conv, [512, 3, 2]]                 # 27 (40x40 -> 20x20)
+  - [[-1, 10], 1, Concat, [1]]                 # 28 cat head P5
+  - [-1, 1, C3k2, [1024, True, 0.5, True]]     # 29 (P5/32-large)
+
+ # 4 đầu ra phát hiện: P2(tầng 20 đã qua SRC), P3(23), P4(26), P5(29)
+  - [[20, 23, 26, 29], 1, Detect, [nc]]        # 30 Detect

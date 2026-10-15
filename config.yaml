@@ -9,7 +9,7 @@ paths:
 
 training:
   weights: "yolo26n-p2.pt"
-  model_yaml: "weights/yolo26n_p2_src.yaml"
+  model_yaml: "yolo26n_p2_src.yaml"
   loss: "ciou"
   epochs: 200
   batch: 16
