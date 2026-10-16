@@ -85,6 +85,6 @@ class SpatialRelationalCoAttention(nn.Module):
 # Ultralytics resolves YAML module names from ``ultralytics.nn.tasks``.
 # Registering at import time keeps the custom layer available to every model
 # construction path, including the trainer's fresh model instance.
-tasks.SpatialRelationalCoAttention = SpatialRelationalCoAttention
+tasks.SpatialRelationalCoAttention = SpatialRelationalCoAttention(sr_ratio=4)
 
 __all__ = ["SpatialRelationalCoAttention"]
