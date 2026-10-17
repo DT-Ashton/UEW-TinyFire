@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Evaluation and Quantitative Metrics Reporting CLI for Fire and Smoke Detection.
-Computes Precision, Recall, mAP50, mAP50-95 on validation/test sets, and exports JSON and CSV reports.
+Computes Precision, Recall, mAP50, mAP50-95 and size-filtered Small/Tiny AP on validation/test sets,
+and exports JSON and CSV reports.
 
 Usage:
     python evaluate.py --weights PATH [--data PATH] [--split test] [--out-dir runs/val/yolo26n]

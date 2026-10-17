@@ -98,8 +98,12 @@ python train.py --weights "path/to/pretrained_model.pt" --data data.yaml --epoch
 Evaluate trained weights on validation or test sets:
 
 ```bash
-python evaluate.py --weights "runs/train/model_name/weights/best.pt" --data data.yaml --split test --out-dir runs/val/eval
+python evaluate.py --weights "runs/train/model_name/weights/best.pt" --data data.yaml --split val --out-dir runs/val/eval
 ```
+
+Use `--split test` once `data.yaml` points to an available test split. 
+
+The run writes `metrics.json` and `metrics.csv` with the usual detection metrics plus `size_ap.small` and `size_ap.tiny` (CSV categories `small/all_classes`, `small/fire`, `small/smoke`, and the corresponding `tiny` rows). Small uses ground-truth boxes with square-root area >= 32 pixels; Tiny uses >= 16 pixels.
 
 ---
 

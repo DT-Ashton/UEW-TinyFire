@@ -1,6 +1,6 @@
 """
 Evaluation and Metrics Reporting Pipeline for Fire and Smoke Detection.
-Computes standard detection metrics (Precision, Recall, mAP50, mAP50-95) overall and per-class,
+Computes standard detection metrics (Precision, Recall, mAP50, mAP50-95) and size-filtered AP,
 and exports quantitative results to structured JSON and CSV formats.
 """
 
@@ -17,6 +17,9 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import torch
 from ultralytics import YOLO
+from ultralytics.models.yolo.detect import DetectionValidator
+from ultralytics.utils import ops
+from ultralytics.utils.metrics import ap_per_class, box_iou
 
 try:
     from src.fire_audit.config import get_configured_data_yaml_path, get_configured_weights_path
@@ -24,6 +27,111 @@ except ImportError:
     from fire_audit.config import get_configured_data_yaml_path, get_configured_weights_path
 
 logger = logging.getLogger(__name__)
+
+SIZE_THRESHOLDS = {"small": 32, "tiny": 16}
+
+
+def _summarize_size_ap(records: Dict[str, List[np.ndarray]], names: Dict[int, str], niou: int) -> Dict[str, Any]:
+    """Run Ultralytics AP once per IoU threshold so ignored detections are excluded."""
+    arrays = {key: np.concatenate(values) for key, values in records.items()}
+    counts = np.bincount(arrays["target_cls"].astype(int), minlength=len(names))
+    ap = np.zeros((len(names), niou))
+    if counts.sum():
+        for i in range(niou):
+            keep = ~arrays["ignored"][:, i]
+            result = ap_per_class(
+                arrays["tp"][keep, i : i + 1],
+                arrays["conf"][keep],
+                arrays["pred_cls"][keep],
+                arrays["target_cls"],
+            )
+            ap[result[6], i] = result[5][:, 0]
+
+    active = counts > 0
+    per_class = {
+        cname: {
+            "map50": round(_safe_float(ap[int(cid), 0]), 5),
+            "map50_95": round(_safe_float(ap[int(cid)].mean()), 5),
+            "num_targets": int(counts[int(cid)]),
+        }
+        for cid, cname in names.items()
+    }
+    return {
+        "overall": {
+            "map50": round(_safe_float(ap[active, 0].mean()) if active.any() else 0.0, 5),
+            "map50_95": round(_safe_float(ap[active].mean()) if active.any() else 0.0, 5),
+            "num_targets": int(counts.sum()),
+        },
+        "per_class": per_class,
+    }
+
+
+class SizeAwareDetectionValidator(DetectionValidator):
+    """Collect size-filtered AP alongside the unchanged YOLO detection metrics."""
+
+    def init_metrics(self, model: Any) -> None:
+        super().init_metrics(model)
+        self.size_stats = {
+            name: {key: [] for key in ("tp", "ignored", "conf", "pred_cls", "target_cls")}
+            for name in SIZE_THRESHOLDS
+        }
+
+    def _size_matches(
+        self, pred: Dict[str, torch.Tensor], batch: Dict[str, Any], min_side: int
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Match eligible targets first, then mark one-to-one matches to ignored targets."""
+        boxes = ops.scale_boxes(
+            batch["imgsz"], batch["bboxes"].clone(), batch["ori_shape"], batch["ratio_pad"]
+        )
+        area = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+        eligible = area >= min_side ** 2
+        selected = {**batch, "cls": batch["cls"][eligible], "bboxes": batch["bboxes"][eligible]}
+        tp = self._process_batch(pred, selected)["tp"]
+        ignored = np.zeros_like(tp)
+
+        outside = ~eligible
+        if outside.any() and pred["cls"].numel():
+            ignored_iou = box_iou(batch["bboxes"][outside], pred["bboxes"])
+            same_class = batch["cls"][outside][:, None] == pred["cls"]
+            ignored_iou = (ignored_iou * same_class).cpu().numpy()
+            for i, threshold in enumerate(self.iouv.cpu().tolist()):
+                matches = np.argwhere((ignored_iou >= threshold) & ~tp[:, i][None, :])
+                if len(matches):
+                    # Mirror YOLO's IoU-first, one-to-one assignment for non-crowd labels.
+                    matches = matches[ignored_iou[matches[:, 0], matches[:, 1]].argsort()[::-1]]
+                    matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
+                    matches = matches[np.unique(matches[:, 0], return_index=True)[1]]
+                    ignored[matches[:, 1], i] = True
+
+        return tp, ignored, selected["cls"].cpu().numpy()
+
+    def update_metrics(self, preds: List[Dict[str, torch.Tensor]], batch: Dict[str, Any]) -> None:
+        super().update_metrics(preds, batch)
+        for si, pred in enumerate(preds):
+            prepared = self._prepare_batch(si, batch)
+            pred = self._prepare_pred(pred)
+            conf = pred["conf"].cpu().numpy()
+            pred_cls = pred["cls"].cpu().numpy()
+            for name, min_side in SIZE_THRESHOLDS.items():
+                tp, ignored, target_cls = self._size_matches(pred, prepared, min_side)
+                records = self.size_stats[name]
+                records["tp"].append(tp)
+                records["ignored"].append(ignored)
+                records["conf"].append(conf)
+                records["pred_cls"].append(pred_cls)
+                records["target_cls"].append(target_cls)
+
+    def get_stats(self) -> Dict[str, Any]:
+        stats = super().get_stats()
+        self.metrics.size_ap = {
+            name: {
+                "min_sqrt_area_px": min_side,
+                **_summarize_size_ap(self.size_stats[name], self.names, self.niou),
+            }
+            for name, min_side in SIZE_THRESHOLDS.items()
+        }
+        return stats
+
 
 def _safe_float(val: Any, default: float = 0.0) -> float:
     """Safely convert value to float, defaulting on None, NaN, Inf, or type conversion errors."""
@@ -98,6 +206,7 @@ def extract_metrics_dict(val_results: Any, split_name: str) -> Dict[str, Any]:
             "fitness": round(fitness, 5),
         },
         "per_class": per_class,
+        "size_ap": getattr(val_results, "size_ap", {}),
         "speed_ms": {
             "preprocess": round(preprocess_ms, 3),
             "inference": round(inference_ms, 3),
@@ -145,6 +254,23 @@ def save_metrics_csv(metrics_list: List[Dict[str, Any]], csv_path: Union[str, Pa
                 "inference_ms": speed.get("inference", 0.0),
                 "fps": speed.get("fps", 0.0),
             })
+
+        for group, report in entry.get("size_ap", {}).items():
+            for category, stats in [
+                ("all_classes", report["overall"]),
+                *report["per_class"].items(),
+            ]:
+                rows.append({
+                    "split": split,
+                    "category": f"{group}/{category}",
+                    "precision": "",
+                    "recall": "",
+                    "map50": stats["map50"],
+                    "map50_95": stats["map50_95"],
+                    "fitness": "",
+                    "inference_ms": "",
+                    "fps": "",
+                })
 
     fieldnames = [
         "split",
@@ -256,6 +382,7 @@ def evaluate_yolo(
     for s_name in splits_to_eval:
         logger.info(f"Running evaluation on split: '{s_name}'...")
         val_res = model.val(
+            validator=SizeAwareDetectionValidator,
             data=str(data_path),
             split=s_name,
             batch=batch,
@@ -278,6 +405,12 @@ def evaluate_yolo(
             f"mAP50: {extracted['overall']['map50']}, "
             f"mAP50-95: {extracted['overall']['map50_95']}"
         )
+        for group, report in extracted["size_ap"].items():
+            logger.info(
+                f"Split [{s_name}] {group.title()} AP -> "
+                f"mAP50: {report['overall']['map50']}, "
+                f"mAP50-95: {report['overall']['map50_95']}"
+            )
 
     if save_json:
         json_p = Path(save_json).resolve()
@@ -298,7 +431,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build CLI parser for model evaluation."""
     parser = argparse.ArgumentParser(
         prog="evaluate",
-        description="Compute standard object detection metrics (Precision, Recall, mAP50, mAP50-95) on dataset splits",
+        description="Compute detection metrics and Small/Tiny AP on dataset splits",
     )
     parser.add_argument("--weights", type=str, default=None, help="Path to trained model weights (default: training.weights from config.yaml)")
     parser.add_argument("--data", type=str, default=None, help="Path to dataset YAML config (default: data_path from config.yaml)")
