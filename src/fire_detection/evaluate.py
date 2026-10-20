@@ -290,6 +290,26 @@ def save_metrics_csv(metrics_list: List[Dict[str, Any]], csv_path: Union[str, Pa
         writer.writerows(rows)
 
 
+def _save_evaluation_reports(
+    results_payload: Dict[str, Any],
+    metrics_list: List[Dict[str, Any]],
+    save_json: Optional[Union[str, Path]],
+    save_csv: Optional[Union[str, Path]],
+) -> None:
+    """Persist the reports and make the destination directories before writing."""
+    if save_json is not None:
+        json_path = Path(save_json).expanduser().resolve()
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(results_payload, f, indent=2)
+        logger.info("Saved evaluation JSON report to: %s", json_path)
+
+    if save_csv is not None:
+        csv_path = Path(save_csv).expanduser().resolve()
+        save_metrics_csv(metrics_list, csv_path)
+        logger.info("Saved evaluation CSV report to: %s", csv_path)
+
+
 def evaluate_yolo(
     weights: Optional[Union[str, Path]] = None,
     data: Optional[Union[str, Path]] = None,
@@ -310,10 +330,9 @@ def evaluate_yolo(
     Run evaluation on validation or test split and export quantitative reports.
 
     Args:
-        out_dir: Optional path identifying the evaluation run. Its final path
-            component is used as the Ultralytics run name (for example,
-            ``runs/val/yolo26n`` uses ``yolo26n``). It does not replace
-            ``project``.
+        out_dir: Optional directory for the JSON/CSV reports. Its final path
+            component is also used as the Ultralytics run name (for example,
+            ``runs/val/yolo26n`` writes reports inside that directory).
         project: Root directory for evaluation artifacts and metric reports.
             Defaults to ``runs/val``.
 
@@ -354,75 +373,81 @@ def evaluate_yolo(
     eval_name = name
     if out_dir is not None:
         out_dir_path = Path(out_dir).expanduser().resolve()
-        if out_dir_path.name:
-            eval_name = out_dir_path.name
+        if not out_dir_path.name:
+            raise ValueError(f"out_dir must name an output directory, got {out_dir!r}")
+        eval_name = out_dir_path.name
 
     project_path = Path(project).expanduser().resolve()
-    project_path.mkdir(parents=True, exist_ok=True)
+    run_project_path = out_dir_path.parent if out_dir_path is not None else project_path
+    run_project_path.mkdir(parents=True, exist_ok=True)
     if save_json is None:
-        save_json = project_path / eval_name / "metrics.json"
+        save_json = (out_dir_path or (project_path / eval_name)) / "metrics.json"
     if save_csv is None:
-        save_csv = project_path / eval_name / "metrics.csv"
+        save_csv = (out_dir_path or (project_path / eval_name)) / "metrics.csv"
+
+    logger.info("Evaluation reports will be written to: %s and %s", save_json, save_csv)
 
     logger.info(f"Loading model for evaluation: {weights_path}")
     model = YOLO(str(weights_path))
 
     splits_to_eval = ["val", "test"] if split in ("both", "all") else [split]
-    project_path_str = str(project_path)
+    project_path_str = str(run_project_path)
     results_payload: Dict[str, Any] = {
         "model": str(weights_path),
         "data_config": str(data_path),
         "device": device_str,
         "splits_evaluated": splits_to_eval,
+        "splits_completed": [],
         "results": {},
     }
 
     metrics_list_for_csv: List[Dict[str, Any]] = []
 
-    for s_name in splits_to_eval:
-        logger.info(f"Running evaluation on split: '{s_name}'...")
-        val_res = model.val(
-            validator=SizeAwareDetectionValidator,
-            data=str(data_path),
-            split=s_name,
-            batch=batch,
-            imgsz=imgsz,
-            conf=conf,
-            iou=iou,
-            device=device_str,
-            project=project_path_str,
-            name=f"{eval_name}",
-            save_json=False,
-            verbose=verbose,
-        )
-
-        extracted = extract_metrics_dict(val_res, s_name)
-        results_payload["results"][s_name] = extracted
-        metrics_list_for_csv.append(extracted)
-        logger.info(
-            f"Split [{s_name}] -> Precision: {extracted['overall']['precision']}, "
-            f"Recall: {extracted['overall']['recall']}, "
-            f"mAP50: {extracted['overall']['map50']}, "
-            f"mAP50-95: {extracted['overall']['map50_95']}"
-        )
-        for group, report in extracted["size_ap"].items():
-            logger.info(
-                f"Split [{s_name}] {group.title()} AP -> "
-                f"mAP50: {report['overall']['map50']}, "
-                f"mAP50-95: {report['overall']['map50_95']}"
+    try:
+        for s_name in splits_to_eval:
+            logger.info(f"Running evaluation on split: '{s_name}'...")
+            val_res = model.val(
+                validator=SizeAwareDetectionValidator,
+                data=str(data_path),
+                split=s_name,
+                batch=batch,
+                imgsz=imgsz,
+                conf=conf,
+                iou=iou,
+                device=device_str,
+                project=project_path_str,
+                name=f"{eval_name}",
+                save_json=False,
+                verbose=verbose,
             )
 
-    if save_json:
-        json_p = Path(save_json).resolve()
-        json_p.parent.mkdir(parents=True, exist_ok=True)
-        with open(json_p, "w", encoding="utf-8") as f:
-            json.dump(results_payload, f, indent=2)
-        logger.info(f"Saved evaluation JSON report to: {json_p}")
+            extracted = extract_metrics_dict(val_res, s_name)
+            results_payload["results"][s_name] = extracted
+            results_payload["splits_completed"].append(s_name)
+            metrics_list_for_csv.append(extracted)
+            logger.info(
+                f"Split [{s_name}] -> Precision: {extracted['overall']['precision']}, "
+                f"Recall: {extracted['overall']['recall']}, "
+                f"mAP50: {extracted['overall']['map50']}, "
+                f"mAP50-95: {extracted['overall']['map50_95']}"
+            )
+            for group, report in extracted["size_ap"].items():
+                logger.info(
+                    f"Split [{s_name}] {group.title()} AP -> "
+                    f"mAP50: {report['overall']['map50']}, "
+                    f"mAP50-95: {report['overall']['map50_95']}"
+                )
 
-    if save_csv:
-        csv_p = Path(save_csv).resolve()
-        save_metrics_csv(metrics_list_for_csv, csv_p)
-        logger.info(f"Saved evaluation CSV report to: {csv_p}")
+            # Write after every completed split. If a later split fails, the
+            # completed metrics remain available instead of being discarded.
+            _save_evaluation_reports(results_payload, metrics_list_for_csv, save_json, save_csv)
+    except Exception:
+        if metrics_list_for_csv:
+            logger.warning(
+                "Evaluation stopped before all requested splits completed; saving the completed split reports."
+            )
+            _save_evaluation_reports(results_payload, metrics_list_for_csv, save_json, save_csv)
+        raise
 
     return results_payload
 
@@ -447,7 +472,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="out_dir",
         type=str,
         default=None,
-        help="Path whose final component is used as the evaluation run name (does not replace project)",
+        help="Directory for metrics.json/metrics.csv; its final component is used as the run name",
     )
     parser.add_argument(
         "--save-json",

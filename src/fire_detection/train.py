@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
+from src.modules.attention.src import SpatialRelationalCoAttention
 from src.modules.nwd.trainer import NWDDetectionTrainer
 from src.modules.wiou.trainer import WIoUDetectionTrainer
 

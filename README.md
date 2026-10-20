@@ -98,7 +98,7 @@ python train.py --weights "path/to/pretrained_model.pt" --data data.yaml --epoch
 Evaluate trained weights on validation or test sets:
 
 ```bash
-python evaluate.py --weights "runs/train/model_name/weights/best.pt" --data data.yaml --split val --out-dir runs/val/eval
+python evaluate.py --weights "runs/train/model_name/weights/best.pt" --data data.yaml --split test --out-dir runs/val/eval
 ```
 
 Use `--split test` once `data.yaml` points to an available test split. 

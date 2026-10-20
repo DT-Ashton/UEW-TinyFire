@@ -9,7 +9,7 @@ class SpatialRelationalCoAttention(nn.Module):
     Spatial-Relational Co-Attention nhẹ cho feature map P2.
     Query giữ độ phân giải P2; Key/Value được giảm không gian để tiết kiệm VRAM.
     """
-    def __init__(self, c1=32, reduction=8, sr_ratio=8):
+    def __init__(self, c1=32, reduction=8, sr_ratio=4):
         super().__init__()
         if c1 <= 0:
             raise ValueError(f"c1 must be positive, got {c1}")
@@ -85,6 +85,6 @@ class SpatialRelationalCoAttention(nn.Module):
 # Ultralytics resolves YAML module names from ``ultralytics.nn.tasks``.
 # Registering at import time keeps the custom layer available to every model
 # construction path, including the trainer's fresh model instance.
-tasks.SpatialRelationalCoAttention = SpatialRelationalCoAttention(sr_ratio=4)
+tasks.SpatialRelationalCoAttention = SpatialRelationalCoAttention
 
 __all__ = ["SpatialRelationalCoAttention"]
