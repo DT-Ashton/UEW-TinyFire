@@ -36,7 +36,7 @@ head:
   # === CHÈN MODULE SPATIAL-RELATIONAL CO-ATTENTION TẠI ĐÂY ===
   # Scale n biến 128 channels khai báo ở layer 19 thành 32 channels thực tế.
   # Custom module không được parser tự scale, nên phải truyền c1=32 trực tiếp.
-  - [-1, 1, SpatialRelationalCoAttention, [32, 8, 4]] # 20 (Refined P2 with memory-safe SRC)
+  - [-1, 1, SpatialRelationalCoAttention, [32, 8, 8, True]] # 20 (Refined P2 with memory-safe SRC)
 
   # --- Đường dẫn Bottom-up ---
   - [-1, 1, Conv, [128, 3, 2]]                 # 21 (160x160 -> 80x80)

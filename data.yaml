@@ -1,6 +1,6 @@
 # Data.yaml is added to .gitignore to avoid multiple users changing the path to their local machine. 
 # Please change the path to your local machine before running the code.
-path: datasets/combined_dataset
+path: datasets/Indoor_Fire_Smoke
 train: train/images
 val: val/images
 test: test/images
