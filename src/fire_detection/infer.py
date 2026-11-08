@@ -17,6 +17,10 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
+from src.modules.bifpn_src import register_modules as register_bifpn_src_modules
+
+register_bifpn_src_modules()
+
 try:
     from src.fire_audit.config import get_configured_inference_source, get_configured_weights_path
 except ImportError:

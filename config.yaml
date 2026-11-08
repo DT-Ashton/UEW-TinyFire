@@ -9,7 +9,7 @@ paths:
 
 training:
   weights: "yolo26n-p2.pt"
-  model_yaml: "yolo26n_p2_src.yaml"
+  model_yaml: "yolo26n-p2_bifpn_src.yaml"
   loss: "ciou"
   epochs: 200
   batch: 16
@@ -19,7 +19,7 @@ training:
   patience: 15
   device: cuda:0
   project: "runs/train"
-  name: "yolo26n-p2_src"
+  name: "yolo26n-p2_bifpn_src"
   workers: 4
   optimizer: "AdamW"
   seed: 42

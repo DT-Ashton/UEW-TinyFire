@@ -21,6 +21,10 @@ from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import ops
 from ultralytics.utils.metrics import ap_per_class, box_iou
 
+from src.modules.bifpn_src import register_modules as register_bifpn_src_modules
+
+register_bifpn_src_modules()
+
 try:
     from src.fire_audit.config import get_configured_data_yaml_path, get_configured_weights_path
 except ImportError:

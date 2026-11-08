@@ -91,6 +91,22 @@ Fine-tune a YOLO model on the dataset specified in `data.yaml`:
 python train.py --weights "path/to/pretrained_model.pt" --data data.yaml --epochs 50 --batch 16 --imgsz 640
 ```
 
+#### YOLO26n with P2, BiFPN, and spatial-relational co-attention
+
+`yolo26n-p2_bifpn_src.yaml` is an opt-in architecture for fire and smoke detection. It keeps the original YOLO26n backbone layers 0–10 so compatible pretrained backbone weights can transfer. P2 and P4 backbone features pass through lightweight spatial-relational co-attention before entering a 64-channel BiFPN. The neck fuses P5→P2 and P2→P5 with learned, normalized nonnegative weights, then refines the final P2 and P4 features with the same attention module. The stock YOLO26 `Detect` head and end-to-end loss receive four scales with strides 4, 8, 16, and 32.
+
+```bash
+python train.py --model-yaml yolo26n-p2_bifpn_src.yaml --weights yolo26n-p2.pt --loss ciou --name yolo26n-p2_bifpn_src --imgsz 640
+```
+
+The CLI registers the custom modules before Ultralytics reads the YAML. For direct Python use, import `register_modules` from `src.modules.bifpn_src`, call it, then create `YOLO("yolo26n-p2_bifpn_src.yaml")`. `config.yaml` still selects the existing P2+SRC experiment by default.
+
+The YAML targets the `n` scale and an input size divisible by 32. To change attention locations, add or remove `SpatialRelationalCoAttentionLite` nodes and update downstream `from` indices and channel arguments. The fusion width is 64 actual channels at scale `n`; changing it also requires updating the `Index`, fusion, and refinement channel arguments. `WeightedBiFPNFusion` takes a concatenated set of equal-width features and returns their normalized weighted sum; the following `Index` tells Ultralytics' parser that the sum has 64 channels. The attention module caps relational attention at an 8×8 token grid while its spatial gate remains at feature resolution.
+
+With Ultralytics 8.4.140, two classes, and a 640×640 input, the new model has 1,619,542 parameters and about 7.00 THOP GFLOPs. Stock YOLO26n-P2 has 2,516,240 parameters and about 7.62 THOP GFLOPs; three-scale YOLO26n has 2,504,580 parameters and about 5.89 THOP GFLOPs. The P2 branch adds compute relative to the three-scale model. THOP may omit functional attention and fusion work, so benchmark target hardware before making a speed claim.
+
+Run `python src/modules/bifpn_src/validate.py` to check the four scales, feature shapes, stock end-to-end loss, and gradients without a dataset or checkpoint.
+
 ---
 
 ### 3. Model Evaluation

@@ -17,9 +17,11 @@ import numpy as np
 import torch
 from ultralytics import YOLO
 
-from src.modules.attention.src import SpatialRelationalCoAttention
+from src.modules.bifpn_src import register_modules as register_bifpn_src_modules
 from src.modules.nwd.trainer import NWDDetectionTrainer
 from src.modules.wiou.trainer import WIoUDetectionTrainer
+
+register_bifpn_src_modules()
 
 
 try:
