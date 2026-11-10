@@ -23,6 +23,26 @@ from ultralytics.nn.modules import Detect  # noqa: E402
 from ultralytics.utils import IterableSimpleNamespace  # noqa: E402
 
 
+def validate_attention_modulation() -> None:
+    """Check identity initialization and both signs of the spatial residual."""
+    attention = SpatialRelationalCoAttentionLite(channels=8, pool_size=2)
+    feature = torch.ones(1, 8, 4, 4)
+    with torch.no_grad():
+        attention.spatial.weight.zero_()
+        attention.qkv.weight.zero_()
+        attention.relation_spatial.weight.zero_()
+        attention.relation_channel.weight.zero_()
+        attention.spatial.bias.fill_(2.0)
+        assert torch.equal(attention(feature), feature), "Zero gain must preserve the feature exactly"
+
+        attention.gain.fill_(1.0)
+        enhanced = attention(feature)
+        attention.spatial.bias.fill_(-2.0)
+        suppressed = attention(feature)
+    assert torch.all(enhanced > feature), "Positive spatial evidence must enhance the feature"
+    assert torch.all(suppressed < feature), "Negative spatial evidence must suppress the feature"
+
+
 def validate(imgsz: int = 256) -> None:
     """Build the YAML and check its feature graph and stock training loss."""
     if imgsz < 32 or imgsz % 32:
@@ -31,11 +51,27 @@ def validate(imgsz: int = 256) -> None:
     torch.manual_seed(0)
     torch.set_num_threads(2)
     network = YOLO(str(ROOT / "yolo26n-p2_bifpn_src.yaml"), verbose=False).model
+    assert len(network.yaml["backbone"]) == 11, "Expected the 11-layer YOLO26n backbone"
+    assert not any(
+        isinstance(module, SpatialRelationalCoAttentionLite) for module in network.model[:11]
+    ), "SRC must not appear in the backbone"
+    attention_layers = [
+        index for index, module in enumerate(network.model)
+        if isinstance(module, SpatialRelationalCoAttentionLite)
+    ]
+    assert attention_layers == [30, 41], f"Expected SRC only after neck fusion at 30/41, got {attention_layers}"
+    fusion_layers = [
+        index for index, module in enumerate(network.model)
+        if isinstance(module, WeightedBiFPNFusion)
+    ]
+    assert fusion_layers == [17, 22, 27, 33, 38, 44], f"Expected six BiFPN fusions, got {fusion_layers}"
     head = network.model[-1]
     assert isinstance(head, Detect), f"Expected stock Detect head, got {type(head).__name__}"
     assert head.nl == 4 and len(head.f) == 4, f"Expected four detection levels, got {head.nl}"
+    assert head.f == [30, 35, 41, 46], f"Unexpected Detect inputs: {head.f}"
     strides = [int(value) for value in network.stride.tolist()]
     assert strides == [4, 8, 16, 32], f"Unexpected strides: {strides}"
+    validate_attention_modulation()
 
     shapes: list[tuple[int, ...]] = []
 
@@ -65,7 +101,7 @@ def validate(imgsz: int = 256) -> None:
 
     fusions = [module for module in network.modules() if isinstance(module, WeightedBiFPNFusion)]
     attentions = [module for module in network.modules() if isinstance(module, SpatialRelationalCoAttentionLite)]
-    assert fusions and attentions, "Custom fusion or attention nodes are missing"
+    assert len(fusions) == 6 and len(attentions) == 2, "Unexpected fusion or attention node count"
     assert all(
         module.weights.grad is not None
         and torch.isfinite(module.weights.grad).all()
@@ -79,6 +115,7 @@ def validate(imgsz: int = 256) -> None:
         for module in attentions
     ), "An attention residual gain has no finite, nonzero gradient"
 
+    print(f"Backbone: 11 unchanged layers; neck SRC {attention_layers}; BiFPN fusions {fusion_layers}")
     print(f"Detect: {head.nl} levels; strides {strides}")
     print(f"Features: {shapes}")
     print(f"Stock loss: {float(loss.sum().detach()):.4f}; gradients: {len(fusions)} fusions, {len(attentions)} attentions")

@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-11-10 - Chỉ đặt SRC trong BiFPN neck
+
+- Giữ nguyên backbone YOLO26n ở các layer 0-10 của `yolo26n-p2_bifpn_src.yaml`. Bỏ hai SRC từng đặt sau backbone P2 và P4; các lateral P2/P3/P4/P5 nay lấy trực tiếp từ backbone rồi đưa về 64 kênh. Các layer backbone vẫn tương thích với trọng số pretrained.
+- Giữ nguyên topology của một cell BiFPN P2-P5: ba nút hợp nhất top-down, ba nút bottom-up, trọng số fusion được học riêng tại từng nút và `BiFPNRefine` sau mỗi lần hợp nhất. SRC chỉ còn ở neck, sau khi đã fusion và refine: P2 top-down tại layer 30 và P4 bottom-up tại layer 41. `Detect` gốc lấy `[30, 35, 41, 46]`, tương ứng stride `[4, 8, 16, 32]`.
+- Spatial branch vẫn tạo bản đồ chú ý từ trung bình/cực đại theo kênh và tích chập 7x7. Relational branch vẫn dùng Q/K/V trên lưới tối đa 8x8 để học quan hệ giữa các vị trí không gian. Hai nhánh trao đổi thông tin: spatial gate điều chế token trước self-attention, còn relational output góp vào spatial và channel gate sau attention.
+- Đổi phép điều chế cuối thành `modulation = spatial_gate + channel_gate - 1` và `output = x + tanh(gain) * x * modulation`. Giá trị modulation có thể dương hoặc âm, nên module có khả năng tăng cường vùng tín hiệu và giảm đáp ứng nền; đó là cơ chế thiết kế, **chưa phải kết quả đã chứng minh** cho fire/smoke. `gain = 0` vẫn khiến mỗi SRC là phép đồng nhất khi khởi tạo. Thay đổi này không thêm tham số và không mở rộng attention matrix.
+- SRC nhận feature đã hợp nhất từ nhiều mức BiFPN, nên spatial/relational attention xử lý thông tin đa mức trong feature đó. Đây **không phải** cross-attention trực tiếp giữa từng cặp feature map nguồn: Q/K/V đều được tạo từ cùng một feature map đã fusion.
+
+```mermaid
+flowchart TD
+    B[YOLO26n backbone 0-10, không SRC] --> L[P2-P5 lateral, 64 kênh]
+    L --> T4[Top-down P4: fusion + refine]
+    T4 --> T3[Top-down P3: fusion + refine]
+    T3 --> T2[Top-down P2: fusion + refine]
+    T2 --> S2[SRC neck P2, layer 30]
+    S2 --> U3[Bottom-up P3: fusion + refine, layer 35]
+    U3 --> U4[Bottom-up P4: fusion + refine]
+    U4 --> S4[SRC neck P4, layer 41]
+    S4 --> U5[Bottom-up P5: fusion + refine, layer 46]
+    S2 --> D[YOLO26 Detect P2-P5]
+    U3 --> D
+    S4 --> D
+    U5 --> D
+```
+
+Kiểm tra dựng model xác nhận bốn stride `[4, 8, 16, 32]`. Với hai lớp và ảnh 640x640, kiến trúc này có **1,609,078 tham số** và khoảng **6.989 GFLOPs theo THOP**, so với 1,619,542 tham số và khoảng 6.995 GFLOPs trước khi bỏ SRC ở backbone. THOP có thể không tính đầy đủ các phép toán attention/fusion dạng hàm; chưa có kết quả train/evaluate chứng minh cải thiện AP, recall, false alarm hoặc tốc độ trên GPU.
+
+---
+
 ## 2026-11-09 - YOLO26n-P2 BiFPN + Spatial-Relational Co-Attention
 
 ### Phạm vi thay đổi

@@ -8,13 +8,14 @@ from torch.nn import functional as F
 
 
 class SpatialRelationalCoAttentionLite(nn.Module):
-    """Exchange spatial and long-range cues without full-resolution attention.
+    """Refine one fused feature map with spatial and pooled relational cues.
 
     Spatial evidence from the original feature map gates the pooled query, key,
-    and value tokens. Their relational context then controls both a spatial mask
-    and a channel mask at the original resolution. At initialization the
-    residual gain is zero, so pretrained feature paths start as exact identity.
-    The attention matrix has at most ``pool_size ** 4`` elements per image.
+    and value tokens. Relational context controls spatial and channel gates;
+    their signed modulation can enhance relevant responses and suppress noise.
+    This is attention within the fused map, not explicit pairwise attention
+    across its source maps. Zero residual gain starts as exact identity. The
+    attention matrix has at most ``pool_size ** 4`` elements per image.
     """
 
     def __init__(self, channels: int, reduction: int = 8, pool_size: int = 8):
@@ -63,7 +64,8 @@ class SpatialRelationalCoAttentionLite(nn.Module):
 
         spatial_gate = (spatial_logits + relation_spatial).sigmoid()
         channel_gate = self.relation_channel(F.adaptive_avg_pool2d(relation, 1)).sigmoid()
-        return x + self.gain.tanh() * (x * spatial_gate * channel_gate)
+        modulation = spatial_gate + channel_gate - 1.0
+        return x + self.gain.tanh() * (x * modulation)
 
 
 __all__ = ["SpatialRelationalCoAttentionLite"]
