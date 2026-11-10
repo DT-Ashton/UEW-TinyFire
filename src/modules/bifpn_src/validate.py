@@ -30,7 +30,7 @@ def validate(imgsz: int = 256) -> None:
 
     torch.manual_seed(0)
     torch.set_num_threads(2)
-    network = YOLO(str(ROOT / "yolo26n_bifpn_src_p2.yaml"), verbose=False).model
+    network = YOLO(str(ROOT / "yolo26n-p2_bifpn_src.yaml"), verbose=False).model
     head = network.model[-1]
     assert isinstance(head, Detect), f"Expected stock Detect head, got {type(head).__name__}"
     assert head.nl == 4 and len(head.f) == 4, f"Expected four detection levels, got {head.nl}"

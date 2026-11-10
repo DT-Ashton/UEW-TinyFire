@@ -1,5 +1,5 @@
 # YOLO26n backbone with spatial-relational attention and a one-pass P2-P5 BiFPN.
-# This is a separate architecture; the stock YOLO26 and existing P2+SRC YAMLs are unchanged.
+# This project-specific architecture does not modify the installed stock YOLO26 model.
 nc: 2  # fire, smoke
 end2end: True
 reg_max: 1

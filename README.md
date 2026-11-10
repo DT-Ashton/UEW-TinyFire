@@ -93,13 +93,13 @@ python train.py --weights "path/to/pretrained_model.pt" --data data.yaml --epoch
 
 #### YOLO26n with P2, BiFPN, and spatial-relational co-attention
 
-`yolo26n-p2_bifpn_src.yaml` is an opt-in architecture for fire and smoke detection. It keeps the original YOLO26n backbone layers 0–10 so compatible pretrained backbone weights can transfer. P2 and P4 backbone features pass through lightweight spatial-relational co-attention before entering a 64-channel BiFPN. The neck fuses P5→P2 and P2→P5 with learned, normalized nonnegative weights, then refines the final P2 and P4 features with the same attention module. The stock YOLO26 `Detect` head and end-to-end loss receive four scales with strides 4, 8, 16, and 32.
+`yolo26n-p2_bifpn_src.yaml` is the project's configured architecture for fire and smoke detection. It keeps the original YOLO26n backbone layers 0–10 so compatible pretrained backbone weights can transfer. P2 and P4 backbone features pass through lightweight spatial-relational co-attention before entering a 64-channel BiFPN. The neck fuses P5→P2 and P2→P5 with learned, normalized nonnegative weights, then refines the final P2 and P4 features with the same attention module. The stock YOLO26 `Detect` head and end-to-end loss receive four scales with strides 4, 8, 16, and 32.
 
 ```bash
 python train.py --model-yaml yolo26n-p2_bifpn_src.yaml --weights yolo26n-p2.pt --loss ciou --name yolo26n-p2_bifpn_src --imgsz 640
 ```
 
-The CLI registers the custom modules before Ultralytics reads the YAML. For direct Python use, import `register_modules` from `src.modules.bifpn_src`, call it, then create `YOLO("yolo26n-p2_bifpn_src.yaml")`. `config.yaml` still selects the existing P2+SRC experiment by default.
+The CLI registers the custom modules before Ultralytics reads the YAML. For direct Python use, import `register_modules` from `src.modules.bifpn_src`, call it, then create `YOLO("yolo26n-p2_bifpn_src.yaml")`. `config.yaml` selects this model by default.
 
 The YAML targets the `n` scale and an input size divisible by 32. To change attention locations, add or remove `SpatialRelationalCoAttentionLite` nodes and update downstream `from` indices and channel arguments. The fusion width is 64 actual channels at scale `n`; changing it also requires updating the `Index`, fusion, and refinement channel arguments. `WeightedBiFPNFusion` takes a concatenated set of equal-width features and returns their normalized weighted sum; the following `Index` tells Ultralytics' parser that the sum has 64 channels. The attention module caps relational attention at an 8×8 token grid while its spatial gate remains at feature resolution.
 
