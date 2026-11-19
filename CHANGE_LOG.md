@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-11-20 - Ba thí nghiệm kiến trúc YOLO26n-P2
+
+Thiết lập ba cấu hình để so sánh riêng tác động của BiFPN, SRC và cách kết hợp hai thành phần. Mỗi thí nghiệm có YAML độc lập; cả ba giữ nguyên 11 layer backbone YOLO26n-P2, hai lớp `fire`/`smoke`, head `Detect` end-to-end gốc và bốn mức phát hiện P2-P5 với stride `[4, 8, 16, 32]`.
+
+| Thí nghiệm | Model YAML | Neck | SRC trong neck | Nguồn của `Detect` |
+| --- | --- | --- | --- | --- |
+| 1. BiFPN | `yolo26n-p2_bifpn.yaml` | BiFPN có trọng số, sáu nút fusion | Không có | `[29, 34, 39, 44]` |
+| 2. SRC | `yolo26n-p2_src.yaml` | PAN gốc của YOLO26n-P2 | Sau P2/P4 đã hợp nhất, layer `[20, 27]` | `[20, 23, 27, 30]` |
+| 3. BiFPN + SRC | `yolo26n-p2_bifpn_src.yaml` | Cùng topology sáu nút fusion với thí nghiệm 1 | Sau P2/P4 đã hợp nhất, layer `[30, 41]` | `[30, 35, 41, 46]` |
+
+Ở thí nghiệm 1 và 3, BiFPN vẫn gồm ba nút top-down, ba nút bottom-up, các phép fusion có trọng số học được, cùng `BiFPNRefine` sau fusion. Thí nghiệm 3 chỉ chèn SRC sau các nút P2 top-down và P4 bottom-up; bỏ hai SRC đó ra và đánh lại chỉ số thì đồ thị BiFPN trùng thí nghiệm 1. Thí nghiệm 2 giữ PAN gốc, cũng chỉ đặt SRC sau feature fusion ở P2 và P4. Không có SRC trong backbone.
+
+SRC mới là `NeckSpatialRelationCoAttention` tại `src/modules/co_attention/neck.py`, được tách từ ý tưởng của file mẫu `src/modules/co_attention/src_coattention.py`. Module tạo hai nhánh tiềm ẩn đặt tên fire và smoke; mỗi hướng dùng query ở độ phân giải feature gốc để đọc key/value từ nhánh kia sau khi pooling xuống tối đa 8x8. Attention chia query thành từng đoạn để giới hạn bộ nhớ. Tên hai nhánh chỉ mô tả mục tiêu thiết kế: cả ba thí nghiệm dùng detection loss chuẩn, **không dùng auxiliary box-occupancy loss** của file mẫu, vì vậy chưa có giám sát trực tiếp để khẳng định các gate tương ứng với lớp fire và smoke.
+
+Luồng đăng ký module cho YAML parser đã được tích hợp vào train, infer và evaluate. `config.yaml` tiếp tục chọn thí nghiệm 3 làm mặc định; có thể chạy từng thí nghiệm qua `python train.py --model-yaml <file> --weights yolo26n-p2.pt --loss ciou --name <ten-rieng>`. Để so sánh công bằng, cần giữ cùng `data.yaml`, seed, kích thước ảnh và các siêu tham số huấn luyện. File `src/fire_detection/validate_experiments.py` kiểm tra cả ba model trên CPU mà không cần dataset/checkpoint: backbone giống YAML gốc, topology BiFPN 1/3 tương đương, số SRC lần lượt `0/2/2`, shape/stride của bốn output, loss gốc và gradient của fusion/SRC.
+
+Số đo cấu trúc với Ultralytics 8.4.140, hai lớp và input 640x640:
+
+| Thí nghiệm | Tham số | THOP GFLOPs | Tensor khớp khi nạp `yolo26n-p2.pt` |
+| --- | ---: | ---: | ---: |
+| 1. BiFPN | 1,604,766 | 6.9833 | 240/632 |
+| 2. SRC | 2,553,638 | 8.1261 | 402/950 |
+| 3. BiFPN + SRC | 1,638,068 | 7.6702 | 240/680 |
+
+Cả ba nạp cùng 240 tensor backbone; thí nghiệm 2 còn nạp thêm tensor PAN/head có shape tương thích, nên điểm khởi tạo ngoài backbone không hoàn toàn giống nhau. THOP có thể chưa tính hết các phép toán `scaled_dot_product_attention` và weighted fusion dạng hàm. Chưa có kết quả huấn luyện, độ chính xác, độ trễ hay GPU memory để kết luận mô hình nào tốt hơn.
+
+---
+
 ## 2026-11-10 - Chỉ đặt SRC trong BiFPN neck
 
 - Giữ nguyên backbone YOLO26n ở các layer 0-10 của `yolo26n-p2_bifpn_src.yaml`. Bỏ hai SRC từng đặt sau backbone P2 và P4; các lateral P2/P3/P4/P5 nay lấy trực tiếp từ backbone rồi đưa về 64 kênh. Các layer backbone vẫn tương thích với trọng số pretrained.

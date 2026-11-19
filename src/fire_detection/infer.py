@@ -18,8 +18,10 @@ import torch
 from ultralytics import YOLO
 
 from src.modules.bifpn_src import register_modules as register_bifpn_src_modules
+from src.modules.co_attention import register_modules as register_co_attention_modules
 
 register_bifpn_src_modules()
+register_co_attention_modules()
 
 try:
     from src.fire_audit.config import get_configured_inference_source, get_configured_weights_path

@@ -91,21 +91,37 @@ Fine-tune a YOLO model on the dataset specified in `data.yaml`:
 python train.py --weights "path/to/pretrained_model.pt" --data data.yaml --epochs 50 --batch 16 --imgsz 640
 ```
 
-#### YOLO26n with P2, BiFPN, and spatial-relational co-attention
+#### Three YOLO26n-P2 architecture experiments
 
-`yolo26n-p2_bifpn_src.yaml` is the project's configured architecture for fire and smoke detection. Its YOLO26n backbone layers 0–10 are unchanged, allowing compatible pretrained weights to transfer. The 64-channel BiFPN fuses P5→P2 and P2→P5 with learned, normalized nonnegative weights. Spatial-relational co-attention is placed only in the neck, after the fused and refined P2 top-down and P4 bottom-up nodes. The stock YOLO26 `Detect` head and end-to-end loss receive four scales with strides 4, 8, 16, and 32.
+All three models use the unchanged YOLO26n-P2 backbone, four P2-P5 detection scales with strides 4/8/16/32, the stock end-to-end `Detect` head, and the standard detection loss. The experiment changes are confined to the neck:
+
+| Experiment | YAML | Neck | SRC positions | Detect inputs |
+| --- | --- | --- | --- | --- |
+| 1. BiFPN | `yolo26n-p2_bifpn.yaml` | One six-node weighted bidirectional P2-P5 BiFPN cell | None | `[29, 34, 39, 44]` |
+| 2. SRC | `yolo26n-p2_src.yaml` | Stock YOLO26n-P2 PAN | Fused P2/P4, layers `[20, 27]` | `[20, 23, 27, 30]` |
+| 3. BiFPN + SRC | `yolo26n-p2_bifpn_src.yaml` | The same six-node BiFPN topology as experiment 1 | Fused P2/P4, layers `[30, 41]` | `[30, 35, 41, 46]` |
+
+Experiments 2 and 3 use `NeckSpatialRelationCoAttention` in `src/modules/co_attention/neck.py`, adapted from the sample `src/modules/co_attention/src_coattention.py`. The sample's path uses an underscore (`co_attention`). The module creates latent fire and smoke branches and exchanges information in both directions: full-resolution queries read keys/values pooled to at most 8x8, with query chunks limiting the attention working set. It preserves feature shape. These latent gates are learned through the standard detection loss; the sample's box-occupancy auxiliary loss and custom trainer are not used. The branch names therefore do not imply independently supervised fire/smoke maps.
+
+Use the same data, pretrained weights, seed, image size, epochs, batch size, and loss when comparing the three runs. Give every run a distinct name because `config.yaml` sets `exist_ok: true`:
 
 ```bash
-python train.py --model-yaml yolo26n-p2_bifpn_src.yaml --weights yolo26n-p2.pt --loss ciou --name yolo26n-p2_bifpn_src --imgsz 640
+python train.py --model-yaml yolo26n-p2_bifpn.yaml --weights yolo26n-p2.pt --data data.yaml --loss ciou --seed 42 --imgsz 640 --epochs 200 --batch 16 --name exp1_bifpn
+python train.py --model-yaml yolo26n-p2_src.yaml --weights yolo26n-p2.pt --data data.yaml --loss ciou --seed 42 --imgsz 640 --epochs 200 --batch 16 --name exp2_src
+python train.py --model-yaml yolo26n-p2_bifpn_src.yaml --weights yolo26n-p2.pt --data data.yaml --loss ciou --seed 42 --imgsz 640 --epochs 200 --batch 16 --name exp3_bifpn_src_coattention
 ```
 
-The CLI registers the custom modules before Ultralytics reads the YAML. For direct Python use, import `register_modules` from `src.modules.bifpn_src`, call it, then create `YOLO("yolo26n-p2_bifpn_src.yaml")`. `config.yaml` selects this model by default.
+`config.yaml` continues to select experiment 3 by default. The train, infer, and evaluate entry points register both custom module packages before model loading. With Ultralytics 8.4.140, two classes, and a 640x640 input, the architecture measurements are:
 
-The YAML targets the `n` scale and an input size divisible by 32. To change attention locations, add or remove `SpatialRelationalCoAttentionLite` nodes in the neck and update downstream `from` indices and channel arguments. The fusion width is 64 actual channels at scale `n`; changing it also requires updating the `Index`, fusion, and refinement channel arguments. `WeightedBiFPNFusion` takes a concatenated set of equal-width features and returns their normalized weighted sum; the following `Index` tells Ultralytics' parser that the sum has 64 channels. The attention module caps relational attention at an 8×8 token grid while its spatial gate remains at feature resolution. Its signed spatial/channel modulation can enhance or reduce local feature responses, although a reduction in fire/smoke false alarms has not been measured. Relational attention operates on the already fused map; it is not explicit pairwise cross-attention between source maps.
+| Experiment | Parameters | THOP GFLOPs | Matching checkpoint state items |
+| --- | ---: | ---: | ---: |
+| 1. BiFPN | 1,604,766 | 6.9833 | 240/632 |
+| 2. SRC | 2,553,638 | 8.1261 | 402/950 |
+| 3. BiFPN + SRC | 1,638,068 | 7.6702 | 240/680 |
 
-With Ultralytics 8.4.140, two classes, and a 640×640 input, the neck-only SRC model has 1,609,078 parameters and about 6.989 THOP GFLOPs. Stock YOLO26n-P2 has 2,516,240 parameters and about 7.62 THOP GFLOPs; three-scale YOLO26n has 2,504,580 parameters and about 5.89 THOP GFLOPs. The P2 branch adds compute relative to the three-scale model. THOP may omit functional attention and fusion work, so benchmark target hardware before making a speed claim.
+All three transfer the same 240 backbone state items. Experiment 2 also transfers matching stock PAN/head items, so initialization beyond the backbone differs between experiments. THOP may omit functional scaled dot-product attention and fusion work; the numbers are not deployment latency or memory measurements. No comparative training metrics have been collected yet.
 
-Run `python src/modules/bifpn_src/validate.py` to check the four scales, feature shapes, stock end-to-end loss, and gradients without a dataset or checkpoint.
+Run `python src/fire_detection/validate_experiments.py` to check the three YAML graphs, backbone identity, BiFPN topology, four detection scales, stock loss, and gradients without a dataset or checkpoint.
 
 ---
 

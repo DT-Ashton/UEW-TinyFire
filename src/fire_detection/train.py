@@ -18,10 +18,12 @@ import torch
 from ultralytics import YOLO
 
 from src.modules.bifpn_src import register_modules as register_bifpn_src_modules
+from src.modules.co_attention import register_modules as register_co_attention_modules
 from src.modules.nwd.trainer import NWDDetectionTrainer
 from src.modules.wiou.trainer import WIoUDetectionTrainer
 
 register_bifpn_src_modules()
+register_co_attention_modules()
 
 
 try:

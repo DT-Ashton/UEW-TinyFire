@@ -1,4 +1,4 @@
-# Unmodified YOLO26n backbone with neck-only spatial-relational attention and P2-P5 BiFPN.
+# Unmodified YOLO26n backbone with neck-only bidirectional fire/smoke co-attention and P2-P5 BiFPN.
 # This project-specific architecture does not modify the installed stock YOLO26 model.
 nc: 2  # fire, smoke
 end2end: True
@@ -49,7 +49,7 @@ head:
   - [-1, 1, WeightedBiFPNFusion, [64, 2]]         # 27
   - [-1, 1, Index, [64, 0]]                        # 28
   - [-1, 1, BiFPNRefine, [64]]                     # 29 P2 top-down
-  - [-1, 1, SpatialRelationalCoAttentionLite, [64, 8, 8]]  # 30 fused P2/4
+  - [-1, 1, NeckSpatialRelationCoAttention, [64, 32, 4, 8, 1024]]  # 30 fused P2/4
 
   # Bottom-up path: P2 -> P3 -> P4 -> P5.
   - [30, 1, nn.MaxPool2d, [2, 2]]                 # 31 P2 -> P3
@@ -63,7 +63,7 @@ head:
   - [-1, 1, WeightedBiFPNFusion, [64, 3]]         # 38
   - [-1, 1, Index, [64, 0]]                        # 39
   - [-1, 1, BiFPNRefine, [64]]                     # 40 P4 bottom-up
-  - [-1, 1, SpatialRelationalCoAttentionLite, [64, 8, 8]]  # 41 fused P4/16
+  - [-1, 1, NeckSpatialRelationCoAttention, [64, 32, 4, 8, 1024]]  # 41 fused P4/16
 
   - [41, 1, nn.MaxPool2d, [2, 2]]                 # 42 P4 -> P5
   - [[42, 14], 1, Concat, [1]]                     # 43

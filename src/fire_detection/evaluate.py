@@ -20,10 +20,14 @@ from ultralytics import YOLO
 from ultralytics.models.yolo.detect import DetectionValidator
 from ultralytics.utils import ops
 from ultralytics.utils.metrics import ap_per_class, box_iou
-
+from src.modules.co_attention import src_coattention
 from src.modules.bifpn_src import register_modules as register_bifpn_src_modules
+from src.modules.co_attention import register_modules as register_co_attention_modules
 
+# Training saved these classes under the top-level module name in its checkpoint.
+sys.modules.setdefault("src_coattention", src_coattention)
 register_bifpn_src_modules()
+register_co_attention_modules()
 
 try:
     from src.fire_audit.config import get_configured_data_yaml_path, get_configured_weights_path
